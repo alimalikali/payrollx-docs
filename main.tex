@@ -1045,21 +1045,35 @@ Dashboard     & \texttt{/api/v1/dashboard}   & GET /hr, GET /employee \\
 \end{tabular}
 \end{table}
 
-All API responses follow the standard format:
-\begin{lstlisting}[language=JavaScript, caption={Standard API Response Format}]
-// Success response
-{
-  success: true,
-  data: { ... },
-  meta: { page, limit, total, totalPages }  // for paginated responses
-}
+All API responses follow the standard format illustrated in Figure~\ref{fig:api_response}.
 
-// Error response
-{
-  success: false,
-  error: { message: "Human-readable error", code: "ERROR_CODE" }
-}
-\end{lstlisting}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  hdr/.style={rectangle, draw=black!40, fill=gray!15, rounded corners=3pt, minimum width=5.2cm, minimum height=0.6cm, font=\small\bfseries, align=center},
+  row/.style={rectangle, draw=black!20, fill=white, minimum width=5.2cm, minimum height=0.55cm, font=\ttfamily\footnotesize, align=left, inner sep=5pt},
+  greenrow/.style={row, fill=green!6},
+  redrow/.style={row, fill=red!5},
+  node distance=0cm,
+]
+\node[hdr, fill=green!20, draw=green!50] (sh) at (-3.2, 0) {Success Response};
+\node[greenrow, below=0cm of sh] (s1) {\texttt{success: true}};
+\node[greenrow, below=0cm of s1] (s2) {\texttt{data: \{ ... \}}};
+\node[greenrow, below=0cm of s2] (s3) {\texttt{meta: \{ page, limit,}};
+\node[greenrow, below=0cm of s3] (s4) {\texttt{\quad\quad\quad total, totalPages \}}};
+
+\node[hdr, fill=red!20, draw=red!50] (eh) at (3.2, 0) {Error Response};
+\node[redrow, below=0cm of eh] (e1) {\texttt{success: false}};
+\node[redrow, below=0cm of e1] (e2) {\texttt{error: \{}};
+\node[redrow, below=0cm of e2] (e3) {\texttt{\quad message: "...",}};
+\node[redrow, below=0cm of e3] (e4) {\texttt{\quad code: "ERR\_CODE" \}}};
+
+\draw[dashed, gray!50] (0, 0.4) -- (0,-2.8);
+\node[font=\footnotesize\itshape, text=gray] at (0,-3.2) {consistent across all endpoints};
+\end{tikzpicture}
+\caption{Standard API Response Format --- Success and Error Envelopes}
+\label{fig:api_response}
+\end{figure}
 
 % ============================================================================
 % CHAPTER 4: IMPLEMENTATION
@@ -1077,51 +1091,38 @@ The first stage established the backend and frontend project structure. The Expr
 
 JWT-based authentication was the first functional feature implemented. The login endpoint validates credentials, compares the password using bcrypt, and returns both an access token (15-minute expiry) and a rotating refresh token (7-day expiry). The authentication middleware validates the access token on every protected route.
 
-\textbf{Authentication Middleware Implementation:}
+Figure~\ref{fig:auth_usecase} shows the authentication use cases for each actor. Figure~\ref{fig:auth_flow} shows the complete JWT authentication sequence including token refresh.
 
-\begin{lstlisting}[language=JavaScript, caption={JWT Authentication Middleware (auth.middleware.js)}]
-const jwt = require('jsonwebtoken');
-const { AppError } = require('../utils/errors');
-const db = require('../config/database');
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  uc/.style={ellipse, draw=black!50, fill=blue!8, font=\footnotesize, align=center, minimum width=4.2cm, minimum height=0.65cm},
+  sysbox/.style={rectangle, draw=black!40, minimum width=6cm, minimum height=7.8cm, dashed, rounded corners=5pt},
+  arr/.style={draw=black!40, -{Stealth[length=4pt]}},
+  lbl/.style={font=\tiny, text=gray},
+]
+\node[sysbox] at (5.2,-3.5) {};
+\node[font=\footnotesize\bfseries] at (5.2,0.4) {Authentication Module};
 
-const protect = async (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer '))
-      throw new AppError('No token provided', 401);
+\node[font=\small\bfseries, align=center] (ua) at (-1.3,-1.5) {$\bigcirc$\\\small Any User};
+\node[font=\small\bfseries, align=center] (ha) at (-1.3,-5.5) {$\bigcirc$\\\small HR/Admin};
 
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+\node[uc] (login)   at (5.2,-0.8) {Login with\\Email + Password};
+\node[uc] (logout)  at (5.2,-2.1) {Logout};
+\node[uc] (refresh) at (5.2,-3.4) {Refresh\\Access Token};
+\node[uc] (protect) at (5.2,-4.7) {Access Protected\\Route};
+\node[uc] (hronly)  at (5.2,-6.0) {Access HR-Only\\Route};
 
-    const { rows } = await db.query(
-      'SELECT id, email, role FROM users WHERE id = $1 AND is_active = true',
-      [decoded.userId]
-    );
-    if (!rows.length) throw new AppError('User not found', 401);
-
-    req.user = rows[0];
-    next();
-  } catch (err) {
-    if (err.name === 'JsonWebTokenError')
-      return res.status(401).json({ success: false,
-        error: { message: 'Invalid token' }});
-    if (err.name === 'TokenExpiredError')
-      return res.status(401).json({ success: false,
-        error: { message: 'Token expired' }});
-    next(err);
-  }
-};
-
-const restrictTo = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role))
-    return next(new AppError('Access denied', 403));
-  next();
-};
-
-module.exports = { protect, restrictTo };
-\end{lstlisting}
-
-Figure~\ref{fig:auth_flow} shows the complete JWT authentication sequence including token refresh.
+\draw[arr] (ua) -- (login);
+\draw[arr] (ua) -- (logout);
+\draw[arr] (ua) -- (refresh);
+\draw[arr] (ua) -- (protect);
+\draw[arr] (ha) -- (hronly);
+\draw[arr] (ha) -- (protect);
+\end{tikzpicture}
+\caption{Authentication Module Use Case Diagram}
+\label{fig:auth_usecase}
+\end{figure}
 
 \begin{figure}[H]
 \centering
@@ -1193,47 +1194,41 @@ Leave management required the most complex state machine: a leave request transi
 
 The payroll module is the most business-critical component. When HR initiates a payroll run for a month, \texttt{payroll.service.js} iterates over all active employees and computes net salary using the following algorithm:
 
-\begin{lstlisting}[language=JavaScript, caption={Payroll Computation Core (payroll.service.js)}]
-async function computeEmployeePayslip(employeeId, month, year) {
-  // 1. Fetch base salary structure
-  const { rows: [salary] } = await db.query(
-    'SELECT * FROM salary_structures WHERE employee_id = $1',
-    [employeeId]
-  );
+Figure~\ref{fig:payroll_usecase} shows the payroll module use cases; Figure~\ref{fig:payroll_flow} illustrates the complete computation flow for a single payroll run.
 
-  // 2. Count working days and absent days in month
-  const workingDays = getWorkingDaysInMonth(month, year);
-  const { rows: attendanceRows } = await db.query(
-    `SELECT COUNT(*) as present FROM attendance
-     WHERE employee_id = $1 AND EXTRACT(MONTH FROM date) = $2
-     AND EXTRACT(YEAR FROM date) = $3 AND status = 'present'`,
-    [employeeId, month, year]
-  );
-  const absentDays = workingDays - parseInt(attendanceRows[0].present);
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  uc/.style={ellipse, draw=black!50, fill=orange!8, font=\footnotesize, align=center, minimum width=4.5cm, minimum height=0.65cm},
+  sysbox/.style={rectangle, draw=black!40, minimum width=6.5cm, minimum height=8.8cm, dashed, rounded corners=5pt},
+  arr/.style={draw=black!40, -{Stealth[length=4pt]}},
+  incl/.style={draw=gray!50, dashed, -{Stealth[length=4pt]}, font=\tiny},
+]
+\node[sysbox] at (5.5,-4) {};
+\node[font=\footnotesize\bfseries] at (5.5,0.4) {Payroll Processing Module};
 
-  // 3. Compute daily rate deduction for absences
-  const dailyRate = salary.basic_salary / workingDays;
-  const absenceDeduction = dailyRate * absentDays;
+\node[font=\small\bfseries, align=center] (hr) at (-1.3,-2)  {$\bigcirc$\\\small HR Admin};
+\node[font=\small\bfseries, align=center] (emp) at (-1.3,-7) {$\bigcirc$\\\small Employee};
 
-  // 4. Apply FBR income tax slab calculation
-  const annualSalary = salary.basic_salary * 12;
-  const monthlyTax = calculateFBRTax(annualSalary, salary.is_filer) / 12;
+\node[uc] (init)     at (5.5,-0.8) {Initiate Payroll Run};
+\node[uc] (compute)  at (5.5,-2.1) {Compute Net Salary};
+\node[uc] (tax)      at (5.5,-3.4) {Apply FBR Tax Slabs};
+\node[uc] (contrib)  at (5.5,-4.7) {Apply EOBI + SESSI};
+\node[uc] (absence)  at (5.5,-6.0) {Apply Absence Deduction};
+\node[uc] (payslip)  at (5.5,-7.3) {Generate Payslip Record};
+\node[uc] (download) at (5.5,-8.6) {Download Payslip PDF};
 
-  // 5. Apply EOBI (0.75%) and SESSI (0.75% up to PKR 25,000)
-  const eobi = salary.basic_salary * 0.0075;
-  const sessi = Math.min(salary.basic_salary, 25000) * 0.0075;
-
-  // 6. Compute net salary
-  const gross = salary.basic_salary + salary.allowances;
-  const totalDeductions = monthlyTax + eobi + sessi + absenceDeduction;
-  const netSalary = gross - totalDeductions;
-
-  return { gross, monthlyTax, eobi, sessi,
-           absenceDeduction, netSalary, absentDays };
-}
-\end{lstlisting}
-
-Figure~\ref{fig:payroll_flow} illustrates the complete payroll computation flow for a single payroll run.
+\draw[arr] (hr)  -- (init);
+\draw[arr] (hr)  -- (compute);
+\draw[arr] (emp) -- (download);
+\draw[incl] (compute) -- node[right]{$\langle\langle$include$\rangle\rangle$} (tax);
+\draw[incl] (compute) -- node[right]{$\langle\langle$include$\rangle\rangle$} (contrib);
+\draw[incl] (compute) -- node[right]{$\langle\langle$include$\rangle\rangle$} (absence);
+\draw[incl] (compute) -- node[right]{$\langle\langle$include$\rangle\rangle$} (payslip);
+\end{tikzpicture}
+\caption{Payroll Processing Module Use Case Diagram}
+\label{fig:payroll_usecase}
+\end{figure}
 
 \begin{figure}[H]
 \centering
@@ -1273,35 +1268,63 @@ Figure~\ref{fig:payroll_flow} illustrates the complete payroll computation flow 
 \label{fig:payroll_flow}
 \end{figure}
 
-The FBR tax calculator in \texttt{taxCalculator.js} implements the 2024--25 tax slabs for both filers and non-filers:
+The FBR tax calculator implements the 2024--25 tax slabs for both filers and non-filers. Table~\ref{tab:fbr_slabs} lists the slab rates; Figure~\ref{fig:tax_flowchart} shows the computation logic.
 
-\begin{lstlisting}[language=JavaScript, caption={FBR Tax Calculator (taxCalculator.js)}]
-function calculateFBRTax(annualSalary, isFiler = true) {
-  // FBR Tax Year 2024-25 slabs (filer rates)
-  const slabs = [
-    { max: 600000,    rate: 0,     base: 0       },
-    { max: 1200000,   rate: 0.025, base: 0       },
-    { max: 2200000,   rate: 0.125, base: 15000   },
-    { max: 3200000,   rate: 0.225, base: 140000  },
-    { max: 4100000,   rate: 0.275, base: 365000  },
-    { max: Infinity,  rate: 0.35,  base: 612500  }
-  ];
+\begin{table}[H]
+\centering
+\caption{FBR Income Tax Slabs 2024--25 (Salaried Filers)}
+\label{tab:fbr_slabs}
+\begin{tabular}{|c|l|c|c|}
+\hline
+\textbf{Slab} & \textbf{Annual Income (PKR)} & \textbf{Rate} & \textbf{Base Tax (PKR)} \\
+\hline
+1 & Up to 600,000              & 0\%    & 0 \\
+\hline
+2 & 600,001 -- 1,200,000       & 2.5\%  & 0 \\
+\hline
+3 & 1,200,001 -- 2,200,000     & 12.5\% & 15,000 \\
+\hline
+4 & 2,200,001 -- 3,200,000     & 22.5\% & 140,000 \\
+\hline
+5 & 3,200,001 -- 4,100,000     & 27.5\% & 365,000 \\
+\hline
+6 & Above 4,100,000            & 35\%   & 612,500 \\
+\hline
+\multicolumn{4}{|l|}{\footnotesize Non-filers pay $\approx$10\% surcharge on top of filer tax} \\
+\hline
+\end{tabular}
+\end{table}
 
-  const prevMax = [0, 600000, 1200000, 2200000, 3200000, 4100000];
-  let tax = 0;
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  proc/.style={rectangle, draw=blue!50, fill=blue!8, rounded corners=3pt, minimum width=5.5cm, minimum height=0.65cm, font=\small, align=center},
+  dec/.style={diamond, draw=orange!60, fill=orange!10, font=\scriptsize, align=center, aspect=3.5},
+  term/.style={rectangle, draw=green!60, fill=green!12, rounded corners=8pt, minimum width=4.5cm, minimum height=0.6cm, font=\small\bfseries, align=center},
+  surbox/.style={rectangle, draw=red!40, fill=red!8, rounded corners=3pt, minimum width=3.5cm, minimum height=0.65cm, font=\small, align=center},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+  lbl/.style={font=\footnotesize, fill=white, inner sep=1pt},
+  node distance=0.7cm,
+]
+\node[term]  (start)    at (0,0)    {Input: annualSalary, isFiler};
+\node[proc]  (slab)     at (0,-1.3) {Find applicable slab (1--6)};
+\node[proc]  (calc)     at (0,-2.6) {tax = base + (income $-$ prevMax) $\times$ rate};
+\node[dec]   (filer)    at (0,-4.0) {isFiler?};
+\node[surbox](surcharge) at (4,-4.0) {tax = tax $\times$ 1.1\\(non-filer surcharge)};
+\node[proc]  (monthly)  at (0,-5.4) {monthlyTax = tax / 12};
+\node[term]  (out)      at (0,-6.7) {Return monthlyTax};
 
-  for (let i = 0; i < slabs.length; i++) {
-    if (annualSalary <= slabs[i].max) {
-      tax = slabs[i].base +
-            (annualSalary - prevMax[i]) * slabs[i].rate;
-      break;
-    }
-  }
-
-  // Non-filer surcharge: approximately 10% higher effective rate
-  return isFiler ? tax : tax * 1.1;
-}
-\end{lstlisting}
+\draw[arr] (start) -- (slab);
+\draw[arr] (slab)  -- (calc);
+\draw[arr] (calc)  -- (filer);
+\draw[arr] (filer) -- node[lbl,above]{no} (surcharge);
+\draw[arr] (filer) -- node[lbl,right]{yes} (monthly);
+\draw[arr] (surcharge) |- (monthly);
+\draw[arr] (monthly) -- (out);
+\end{tikzpicture}
+\caption{FBR Tax Computation Flowchart}
+\label{fig:tax_flowchart}
+\end{figure}
 
 \subsection{Stage 5: AI Analytics Modules}
 
@@ -1441,36 +1464,50 @@ Alerts persisted in \texttt{ai\_alerts} follow the status lifecycle shown in Fig
 
 The chatbot uses intent classification to match user queries to predefined intent handlers. Supported intents include salary queries, leave balance enquiries, attendance status, and general HR information.
 
-\begin{lstlisting}[language=JavaScript, caption={Chatbot Intent Classification (chatbot.service.js)}]
-function classifyIntent(message) {
-  const msg = message.toLowerCase();
-  if (/salary|pay|payslip|earn/.test(msg))
-    return 'SALARY_QUERY';
-  if (/leave balance|days left|remaining leave/.test(msg))
-    return 'LEAVE_BALANCE';
-  if (/attendance|present|absent|check.?in/.test(msg))
-    return 'ATTENDANCE_STATUS';
-  if (/policy|holiday|working hours/.test(msg))
-    return 'HR_POLICY';
-  if (/tax|fbr|eobi|deduction/.test(msg))
-    return 'TAX_INFO';
-  return 'GENERAL';
-}
+Figure~\ref{fig:chatbot_intent} shows the intent classification flowchart used by the chatbot service.
 
-async function processMessage(employeeId, message) {
-  const intent = classifyIntent(message);
-  switch (intent) {
-    case 'SALARY_QUERY':
-      return await getSalaryResponse(employeeId);
-    case 'LEAVE_BALANCE':
-      return await getLeaveBalanceResponse(employeeId);
-    case 'ATTENDANCE_STATUS':
-      return await getAttendanceResponse(employeeId);
-    default:
-      return getGeneralResponse(intent);
-  }
-}
-\end{lstlisting}
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  proc/.style={rectangle, draw=purple!50, fill=purple!8, rounded corners=3pt, minimum width=4.2cm, minimum height=0.65cm, font=\small, align=center},
+  dec/.style={diamond, draw=orange!60, fill=orange!10, font=\scriptsize, align=center, aspect=3},
+  out/.style={rectangle, draw=teal!60, fill=teal!10, rounded corners=4pt, minimum width=3.5cm, minimum height=0.6cm, font=\footnotesize\ttfamily, align=center},
+  term/.style={rectangle, draw=green!60, fill=green!12, rounded corners=8pt, minimum width=4.2cm, minimum height=0.6cm, font=\small\bfseries},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+  lbl/.style={font=\footnotesize, fill=white, inner sep=1pt},
+  node distance=0.55cm,
+]
+\node[term]  (start) at (0,0)    {User message received};
+\node[proc]  (lower) at (0,-1.2) {Normalise: lowercase};
+\node[dec]   (d1)    at (0,-2.5) {salary/pay/\\payslip?};
+\node[dec]   (d2)    at (0,-4.0) {leave balance/\\remaining?};
+\node[dec]   (d3)    at (0,-5.5) {attendance/\\check-in?};
+\node[dec]   (d4)    at (0,-7.0) {tax/fbr/eobi?};
+\node[dec]   (d5)    at (0,-8.5) {policy/holiday?};
+
+\node[out] (r1) at (5.5,-2.5) {SALARY\_QUERY};
+\node[out] (r2) at (5.5,-4.0) {LEAVE\_BALANCE};
+\node[out] (r3) at (5.5,-5.5) {ATTENDANCE\_STATUS};
+\node[out] (r4) at (5.5,-7.0) {TAX\_INFO};
+\node[out] (r5) at (5.5,-8.5) {HR\_POLICY};
+\node[out] (r6) at (5.5,-9.7) {GENERAL};
+
+\draw[arr] (start) -- (lower);
+\draw[arr] (lower) -- (d1);
+\draw[arr] (d1)  -- node[lbl,above]{yes} (r1);
+\draw[arr] (d1)  -- node[lbl,right]{no}  (d2);
+\draw[arr] (d2)  -- node[lbl,above]{yes} (r2);
+\draw[arr] (d2)  -- node[lbl,right]{no}  (d3);
+\draw[arr] (d3)  -- node[lbl,above]{yes} (r3);
+\draw[arr] (d3)  -- node[lbl,right]{no}  (d4);
+\draw[arr] (d4)  -- node[lbl,above]{yes} (r4);
+\draw[arr] (d4)  -- node[lbl,right]{no}  (d5);
+\draw[arr] (d5)  -- node[lbl,above]{yes} (r5);
+\draw[arr] (d5.east) -- ++(0.6,0) |- node[lbl,right]{no} (r6);
+\end{tikzpicture}
+\caption{HR Chatbot Intent Classification Flowchart}
+\label{fig:chatbot_intent}
+\end{figure}
 
 \subsection{Stage 6: Frontend Development}
 
